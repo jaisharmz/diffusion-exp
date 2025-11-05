@@ -15,7 +15,7 @@ import random
 import matplotlib.pyplot as plt
 
 filename = "tinyshakespeare.txt"
-df = open(filename, "r").read()
+df = open(filename, "r").read()[:129]
 unique_chars = set(df)
 id_to_char = {i : char for i, char in enumerate(unique_chars)}
 char_to_id = {char : i for i, char in enumerate(unique_chars)}
@@ -213,13 +213,26 @@ class NNModel(nn.Module):
         
     def compute_loss(self, zt, t, z1, sub_mask, ins_mask, del_mask, padding_mask):
         out = self(zt, t, padding_mask)
+        sub_rate = out["lambdas"]["substituting"]
+        ins_rate = out["lambdas"]["inserting"]
+        del_rate = out["lambdas"]["deleting"]
+        sub_logits = out["probabilities"]["substituting"]
+        ins_logits = out["probabilities"]["inserting"]
+        total_rate = (sub_rate + ins_rate + del_rate) * (~padding_mask)
+        loss_surv = total_rate.sum(dim=1)
+        loss_ce_sub = self.ce(sub_logits.transpose(1, 2), z1)
+        loss_rate_sub = -torch.log(sub_rate + 1e-10)
+        loss_sub = sub_mask * (loss_ce_sub + loss_rate_sub)
+        loss_ce_ins = self.ce(ins_logits.transpose(1, 2), z1)
+        loss_rate_ins = -torch.log(ins_rate + 1e-10)
+        loss_ins = ins_mask * (loss_ce_ins + loss_rate_ins)
+        loss_rate_del = -torch.log(del_rate + 1e-10)
+        loss_del = del_mask * loss_rate_del
+        loss_pos = (loss_sub + loss_ins + loss_del).sum(dim=1)
         kappa_t = 3 * t**2
-        kappa_t_expanded = kappa_t.unsqueeze(1).expand(-1, zt.shape[1])
-        loss_sub = sub_mask * (self.mse(out["lambdas"]["substituting"], kappa_t_expanded) + self.ce(out["probabilities"]["substituting"].transpose(1, 2), z1))
-        loss_ins = ins_mask * (self.mse(out["lambdas"]["inserting"], kappa_t_expanded) + self.ce(out["probabilities"]["inserting"].transpose(1, 2), z1))
-        loss_del = del_mask * self.mse(out["lambdas"]["deleting"], kappa_t_expanded)
-        loss = loss_sub + loss_ins + loss_del
-        return loss
+        one_minus_t = 1.0 - t
+        final_loss_per_sample = (one_minus_t * loss_surv) + (kappa_t * loss_pos)
+        return final_loss_per_sample
     
     @torch.no_grad()
     def generate(self, batch_size, seq_len, n_steps, device, gap_token_id, pad_token_id):
@@ -292,13 +305,13 @@ num_heads = 16
 max_seq_len = seq_len * 2
 bos_token_id = -1
 pad_token_id = PAD_TOKEN
-num_epochs = 1000
+num_steps = 100
 model = NNModel(vocab_size, hidden_dim, num_layers, num_heads, max_seq_len, bos_token_id, pad_token_id)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 losses = []
-for epoch in range(num_epochs):
+for step in range(num_steps):
     x0_batch, x1_batch = get_batch(batch_size, seq_len)
     z1_total = []
     zt_total = []
@@ -341,8 +354,8 @@ for epoch in range(num_epochs):
     loss.backward()
     optimizer.step()
     losses.append(loss.item())
-    if epoch % 10 == 0:
-        print(f"Epoch {epoch}: Loss {loss.item():.4f}")
+    if num_steps % 10 == 0:
+        print(f"Step {step}: Loss {loss.item():.4f}")
 
 plt.plot(torch.arange(len(losses)), losses)
 plt.show()
