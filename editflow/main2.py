@@ -10,7 +10,7 @@ from typing import List, Tuple, Dict, Optional
 
 filename = "tinyshakespeare.txt"
 # Use a bit more data for stable loss
-df = open(filename, "r").read()[:130] 
+df = open(filename, "r").read()[:10000] 
 unique_chars = sorted(list(set(df)))
 id_to_char = {i : char for i, char in enumerate(unique_chars)}
 char_to_id = {char : i for i, char in enumerate(unique_chars)}
@@ -539,7 +539,7 @@ model = NNModel(
     vocab_size, hidden_dim, num_layers, num_heads, 
     max_seq_len, BOS_TOKEN, PAD_TOKEN
 ).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 losses = []
 print("Starting training...")
