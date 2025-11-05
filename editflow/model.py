@@ -55,7 +55,7 @@ class NNModel(nn.Module):
             nn.Linear(hidden_dim, vocab_size)
         )
         self.mse = nn.MSELoss(reduction="none")
-        self.ce = nn.CrossEntropyLoss(reduction="none")
+        self.ce = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_id)
         self.softmax = nn.Softmax(dim=-1)
         self.softplus = nn.Softplus()
     def forward(self, zt, t, padding_mask):
@@ -79,33 +79,27 @@ class NNModel(nn.Module):
 
         ins_logits = self.prob_ins(x)
         sub_logits = self.prob_sub(x)
-        ins_probs = self.softmax(ins_logits)
-        sub_probs = self.softmax(sub_logits)
+        # ins_probs = self.softmax(ins_logits)
+        # sub_probs = self.softmax(sub_logits)
         rates = self.softplus(self.rates_out(x))
 
         mask_expanded = (~padding_mask).unsqueeze(-1).float()
         rates = rates * mask_expanded
-        ins_probs = ins_probs * mask_expanded
-        sub_probs = sub_probs * mask_expanded
+        # ins_probs = ins_probs * mask_expanded
+        # sub_probs = sub_probs * mask_expanded
 
-        # return {"lambdas": {
-        #     "substituting": rates[:,:,0],
-        #     "inserting": rates[:,:,1],
-        #     "deleting": rates[:,:,2],
-        # }, "probabilities":{
-        #     "substituting": sub_logits,
-        #     "inserting": ins_logits,
-        # }}
         return rates, sub_logits, ins_logits
         
     def compute_loss(self, zt, t, z1, sub_mask, ins_mask, del_mask, padding_mask):
-        out = self(zt, t, padding_mask)
-        sub_rate = out["lambdas"]["substituting"]
-        ins_rate = out["lambdas"]["inserting"]
-        del_rate = out["lambdas"]["deleting"]
-        sub_logits = out["probabilities"]["substituting"]
-        ins_logits = out["probabilities"]["inserting"]
-        total_rate = (sub_rate + ins_rate + del_rate) * (~padding_mask)
+        mask = (~padding_mask).float()
+        rates, sub_logits, ins_logits = self(zt, t, padding_mask)
+        sub_rate = rates[:,:,0]
+        ins_rate = rates[:,:,1]
+        del_rate = rates[:,:,2]
+        sub_probs = F.softmax(sub_logits, dim=-1)
+        ins_probs = F.softmax(ins_logits, dim=-1)
+        del_rate = torch.sigmoid(del_logits)
+        total_rate = (sub_rate + ins_rate + del_rate) * (~padding_mask).float()
         loss_surv = total_rate.sum(dim=1)
         loss_ce_sub = self.ce(sub_logits.transpose(1, 2), z1)
         loss_rate_sub = -torch.log(sub_rate + 1e-10)
@@ -120,57 +114,3 @@ class NNModel(nn.Module):
         one_minus_t = 1.0 - t
         final_loss_per_sample = (one_minus_t * loss_surv) + (kappa_t * loss_pos)
         return final_loss_per_sample
-    
-    @torch.no_grad()
-    def generate(self, batch_size, seq_len, n_steps, device, gap_token_id, pad_token_id):
-        self.eval()
-        zt = torch.full((batch_size, seq_len), gap_token_id, 
-                        device=device, dtype=torch.long)
-        
-        dt = 1.0 / n_steps
-        
-        for i in range(n_steps):
-            t = i * dt
-            t_batch = torch.full((batch_size,), t, 
-                                 device=device, dtype=torch.float32)
-            padding_mask = (zt == pad_token_id)
-            out = self(zt, t_batch, padding_mask)
-            lambda_sub = out["lambdas"]["substituting"]
-            lambda_ins = out["lambdas"]["inserting"]
-            lambda_del = out["lambdas"]["deleting"]
-            sub_logits = out["probabilities"]["substituting"]
-            ins_logits = out["probabilities"]["inserting"]
-            current_is_gap = (zt == gap_token_id)
-            current_is_token = ~current_is_gap
-            lambda_ins = lambda_ins * current_is_gap
-            lambda_sub = lambda_sub * current_is_token
-            lambda_del = lambda_del * current_is_token
-            lambda_total = lambda_sub + lambda_ins + lambda_del + 1e-10
-            p_event = 1.0 - torch.exp(-lambda_total * dt)
-            p_cond_sub = lambda_sub / lambda_total
-            p_cond_ins = lambda_ins / lambda_total
-            event_mask = (torch.rand_like(p_event) < p_event)
-            r_event = torch.rand_like(p_event)
-            sub_event_mask = event_mask & (r_event < p_cond_sub)
-            ins_event_mask = event_mask & (r_event >= p_cond_sub) & (r_event < p_cond_sub + p_cond_ins)
-            del_event_mask = event_mask & (r_event >= p_cond_sub + p_cond_ins)
-            if sub_event_mask.any():
-                sub_dist = torch.distributions.Categorical(logits=sub_logits)
-                sub_samples = sub_dist.sample()
-                zt[sub_event_mask] = sub_samples[sub_event_mask]
-            if ins_event_mask.any():
-                ins_dist = torch.distributions.Categorical(logits=ins_logits)
-                ins_samples = ins_dist.sample()
-                zt[ins_event_mask] = ins_samples[ins_event_mask]
-            if del_event_mask.any():
-                zt[del_event_mask] = gap_token_id
-        self.train()
-        final_sequences = []
-        for i in range(batch_size):
-            seq_with_gaps = zt[i]
-            final_seq = seq_with_gaps[
-                (seq_with_gaps != gap_token_id) & 
-                (seq_with_gaps != pad_token_id)
-            ]
-            final_sequences.append(final_seq)
-        return final_sequences
