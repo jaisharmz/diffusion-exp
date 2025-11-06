@@ -63,7 +63,7 @@ if __name__ == "__main__":
         batch_size, seq_len = zt.shape
         t = torch.rand(batch_size)
         attention_mask = zt != tokenizer.PAD_TOKEN
-        zt = generate(model, zt, t, attention_mask)
+        zt = generate(model, zt, attention_mask, t)
         strings = tokenizer.decode(zt)
         print(strings)
         print(zt)
