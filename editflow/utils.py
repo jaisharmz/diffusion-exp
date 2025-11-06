@@ -1,7 +1,24 @@
 import torch
 import torch.nn as nn
 import random
-from generate import Tokenizer
+from tokenizer import Tokenizer
+
+class Edit:
+    def __init__(self, kind, pos, token):
+        self.kind = kind
+        self.pos = pos
+        self.token = token
+
+class CubicKappaScheduler:
+    def __init__(self):
+        self.a = 1.0
+        self.b = 1.0
+    def kappa(self, t):
+        return (self.a + 1) * (t ** 3) - (self.a + self.b + 1) * (t ** 2) + (self.b + 1) * t
+    def kappa_derivative(self, t):
+        return 3 * (self.a + 1) * (t ** 2) - 2 * (self.a + self.b + 1) * t + (self.b + 1)
+    def weight(self, t):
+        return self.kappa_derivative(t) / (1 - self.kappa(t) + 1e-6)
 
 def get_batch(batch_size, seq_len, data_encoded, tokenizer):
     x0 = []
@@ -58,7 +75,7 @@ def align_pair(x0, x1, tokenizer: Tokenizer):
         z0 = [tokenizer.BOS_TOKEN] + z0
     if z1[0] != tokenizer.BOS_TOKEN:
         z1 = [tokenizer.BOS_TOKEN] + z1
-    return z0, z1
+    return {"z0": z0, "z1": z1}
 
 def get_zt(z0, z1, t, tokenizer:Tokenizer):
     # 0 = substitute, 1 = add, 2 = delete
@@ -93,3 +110,38 @@ def get_zt(z0, z1, t, tokenizer:Tokenizer):
     ins_mask = torch.tensor(ins_mask)
     del_mask = torch.tensor(del_mask)
     return zt, edits, sub_mask, ins_mask, del_mask
+
+def build_remaining_edits(zt, z1, tokenizer):
+    edits = []
+    BLANK = tokenizer.BLANK
+    def count_nonblank_prefix(z, j):
+        c = 0
+        for k in range(j):
+            if z[k] != BLANK:
+                c += 1
+        return c
+    
+    for j, (a, b) in enumerate(zip(zt, z1)):
+        if a == b:
+            continue
+        nb = count_nonblank_prefix(zt, j)
+        if a == BLANK and b != BLANK: # insertion
+            edits.append(Edit("INS", max(nb - 1, 0), b))
+        elif a != BLANK and b == BLANK: # deletion
+            edits.append(Edit("DEL", nb, b))
+        else: # substitution
+            edits.append(Edit("SUB", nb, b))
+    return edits
+
+def pad_1d(batch_lists, pad_val):
+    B = len(batch_lists)
+    Lmax = max((len(x) for x in batch_lists), default=0)
+    out = torch.full((B, Lmax), pad_val, dtype=torch.long)
+    mask = torch.zeros((B, Lmax), dtype=torch.long)
+    for b, x in enumerate(batch_lists):
+        if not x:
+            continue
+        L = len(x)
+        out[b, :L] = torch.tensor(x, dtype=torch.long)
+        mask[b, :L] = 1
+    return out, mask

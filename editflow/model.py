@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from utils import align_pair, CubicKappaScheduler, build_remaining_edits, pad_1d
 
 class SinusoidalTimeEmbedding(nn.Module):
     def __init__(self, dim=128):
@@ -17,8 +19,9 @@ class SinusoidalTimeEmbedding(nn.Module):
         return emb
 
 class NNModel(nn.Module):
-    def __init__(self, vocab_size, hidden_dim, num_layers, num_heads, max_seq_len, bos_token_id, pad_token_id):
+    def __init__(self, vocab_size, hidden_dim, num_layers, num_heads, max_seq_len, bos_token_id, pad_token_id, tokenizer, time_epsilon=1e-3, device="cpu"):
         super().__init__()
+        self.tokenizer = tokenizer
         self.vocab_size = vocab_size
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
@@ -26,6 +29,9 @@ class NNModel(nn.Module):
         self.max_seq_len = max_seq_len
         self.bos_token_id = bos_token_id
         self.pad_token_id = pad_token_id
+        self.time_epsilon = time_epsilon
+        self.device = device
+        self.scheduler = CubicKappaScheduler()
         self.token_embedding = nn.Embedding(vocab_size, hidden_dim)
         self.time_embedding = nn.Sequential(
             SinusoidalTimeEmbedding(hidden_dim),
@@ -58,59 +64,83 @@ class NNModel(nn.Module):
         self.ce = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_id)
         self.softmax = nn.Softmax(dim=-1)
         self.softplus = nn.Softplus()
-    def forward(self, zt, t, padding_mask):
-        # predict lambdas: rate of (inserting, deleting, substituting) any token at i
-        # predict probabilities: probability of (inserting, substituting) at token i any of the tokens in the dictionary
-        batch_size, seq_len = zt.shape
-        zt_emb = self.token_embedding(zt)
-
+    # def forward(self, zt, t, padding_mask):
+    def forward(self, input_ids, attention_mask, t):
+        # predict lambdas: rate of (substituting, deleting, inserting) any token at i
+        # predict probabilities: probability of (substituting, inserting) at token i any of the tokens in the dictionary
+        batch_size, seq_len = input_ids.shape
+        zt_emb = self.token_embedding(input_ids)
         time_emb = self.time_embedding(t)
         time_emb = time_emb.unsqueeze(1).expand(-1, seq_len, -1)
 
-        positions = torch.arange(seq_len, device=zt.device).unsqueeze(0).expand(batch_size, -1)
+        positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
         pos_emb = self.pos_embedding(positions)
 
         x = zt_emb + time_emb + pos_emb
         x = x.transpose(0, 1)
         for layer in self.layers:
-            x = layer(x, src_key_padding_mask=padding_mask)
+            x = layer(x, src_key_padding_mask=(~attention_mask.bool()))
         x = x.transpose(0, 1)
         x = self.final_layer_norm(x)
 
         ins_logits = self.prob_ins(x)
         sub_logits = self.prob_sub(x)
-        # ins_probs = self.softmax(ins_logits)
-        # sub_probs = self.softmax(sub_logits)
         rates = self.softplus(self.rates_out(x))
 
-        mask_expanded = (~padding_mask).unsqueeze(-1).float()
+        mask_expanded = (attention_mask).unsqueeze(-1).float()
         rates = rates * mask_expanded
-        # ins_probs = ins_probs * mask_expanded
-        # sub_probs = sub_probs * mask_expanded
-
-        return rates, sub_logits, ins_logits
+        out = {"sub_rate": rates[:,:,0], "del_rate": rates[:,:,1], "ins_rate": rates[:,:,2],
+               "sub_logits": sub_logits, "ins_logits": ins_logits}
+        return out
+    def compute_loss(self, inputs):
+        # inputs have x0 and x1
+        device = self.device
+        B = len(inputs["x0_ids"])
+        aligns = [align_pair(x0, x1, self.tokenizer) for x0, x1 in zip(inputs["x0_ids"], inputs["x1_ids"])]
+        z0_list = [a["z0"] for a in aligns]
+        z1_list = [a["z1"] for a in aligns]
         
-    def compute_loss(self, zt, t, z1, sub_mask, ins_mask, del_mask, padding_mask):
-        mask = (~padding_mask).float()
-        rates, sub_logits, ins_logits = self(zt, t, padding_mask)
-        sub_rate = rates[:,:,0]
-        ins_rate = rates[:,:,1]
-        del_rate = rates[:,:,2]
-        sub_probs = F.softmax(sub_logits, dim=-1)
-        ins_probs = F.softmax(ins_logits, dim=-1)
-        del_rate = torch.sigmoid(del_logits)
-        total_rate = (sub_rate + ins_rate + del_rate) * (~padding_mask).float()
-        loss_surv = total_rate.sum(dim=1)
-        loss_ce_sub = self.ce(sub_logits.transpose(1, 2), z1)
-        loss_rate_sub = -torch.log(sub_rate + 1e-10)
-        loss_sub = sub_mask * (loss_ce_sub + loss_rate_sub)
-        loss_ce_ins = self.ce(ins_logits.transpose(1, 2), z1)
-        loss_rate_ins = -torch.log(ins_rate + 1e-10)
-        loss_ins = ins_mask * (loss_ce_ins + loss_rate_ins)
-        loss_rate_del = -torch.log(del_rate + 1e-10)
-        loss_del = del_mask * loss_rate_del
-        loss_pos = (loss_sub + loss_ins + loss_del).sum(dim=1)
-        kappa_t = 3 * t**2
-        one_minus_t = 1.0 - t
-        final_loss_per_sample = (one_minus_t * loss_surv) + (kappa_t * loss_pos)
-        return final_loss_per_sample
+        t = (1 - self.time_epsilon) * torch.rand(B, 1, device=device)
+        k = self.scheduler.kappa(t).to(device)
+        w = self.scheduler.weight(t).squeeze(1).to(device)
+        
+        zt_list = []
+        for z0, z1, kb in zip(z0_list, z1_list, k.squeeze(1).tolist()):
+            choose_target = torch.rand(len(z0)) < kb
+            zt = [b if choose_target[j] else a for j, (a, b) in enumerate(zip(z0, z1))]
+            zt_list.append(zt)
+        
+        xt_list = [[c for c in zt if c != self.tokenizer.BLANK] for zt in zt_list]
+        edits_list = [build_remaining_edits(zt, z1, self.tokenizer) for zt, z1 in zip(zt_list, z1_list)]
+
+        x_tok, x_mask = pad_1d(xt_list, pad_val=self.tokenizer.PAD_TOKEN)
+        x_tok, x_mask = x_tok.to(device), x_mask.to(device)
+        
+        out = self(input_ids=x_tok, attention_mask=x_mask, t=t)
+        sub_rate = out["sub_rate"]
+        del_rate = out["del_rate"]
+        ins_rate = out["ins_rate"]
+        logprob_sub = F.log_softmax(out["sub_logits"], dim=-1)
+        logprob_ins = F.log_softmax(out["ins_logits"], dim=-1)
+
+        L1 = torch.tensor([len(x1) for x1 in inputs["x1_ids"]], device=device, dtype=torch.float).clamp_min(1.0)
+        total_rate = sub_rate + del_rate + ins_rate
+        loss_surv = ((w * (total_rate * x_mask.float()).sum(dim=1)) / L1).mean()
+
+        loss_pos_per = sub_rate.new_zeros(B)
+        for b, edits in enumerate(edits_list):
+            if not edits:
+                continue
+            cur_len = int(x_mask[b].sum().item())
+            for e in edits:
+                pos = e.pos
+                tok = e.token
+                if e.kind == "SUB":
+                    loss_pos_per[b] -= logprob_sub[b, pos, tok] + torch.log(sub_rate[b, pos])
+                elif e.kind == "DEL":
+                    loss_pos_per[b] -= torch.log(del_rate[b, pos])
+                elif e.kind == "INS":
+                    loss_pos_per[b] -= logprob_ins[b, pos, tok] + torch.log(ins_rate[b, pos])
+        loss_pos = ((w * loss_pos_per) / L1).mean()
+        loss = loss_surv + loss_pos
+        return loss, out
