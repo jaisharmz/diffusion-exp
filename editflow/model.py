@@ -97,6 +97,7 @@ class NNModel(nn.Module):
         device = self.device
         B = len(inputs["x0_ids"])
         aligns = [align_pair(x0, x1, self.tokenizer) for x0, x1 in zip(inputs["x0_ids"], inputs["x1_ids"])]
+
         z0_list = [a["z0"] for a in aligns]
         z1_list = [a["z1"] for a in aligns]
         

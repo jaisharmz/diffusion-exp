@@ -18,7 +18,7 @@ model = NNModel(vocab_size=tokenizer.vocab_size, hidden_dim=64, num_layers=3, nu
 model.to(device)
 
 num_steps = 1000
-batch_size = 1024
+batch_size = 512
 max_seq_len = 128
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 

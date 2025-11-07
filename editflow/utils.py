@@ -75,6 +75,7 @@ def align_pair(x0, x1, tokenizer: Tokenizer):
         z0 = [tokenizer.BOS_TOKEN] + z0
     if z1[0] != tokenizer.BOS_TOKEN:
         z1 = [tokenizer.BOS_TOKEN] + z1
+
     return {"z0": z0, "z1": z1}
 
 def get_zt(z0, z1, t, tokenizer:Tokenizer):
