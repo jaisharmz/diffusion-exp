@@ -5,6 +5,8 @@ from utils import get_batch, align_pair, get_zt, Edit, perturb_string
 from generate import Tokenizer, generate
 from model import NNModel
 
+# TODO: 1) fix pad token, 2) safe log, 3) make torch Dataset object and collate function
+
 filename = "tinyshakespeare.txt"
 df = open(filename, "r").read()#[:1000]
 unique_chars = set(df)
