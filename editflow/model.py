@@ -1,3 +1,4 @@
+# === model.py ===
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -77,6 +78,8 @@ class NNModel(nn.Module):
         pos_emb = self.pos_embedding(positions)
 
         x = zt_emb + time_emb + pos_emb
+
+        # Transformer expects [L, B, D]
         x = x.transpose(0, 1)
         for layer in self.layers:
             x = layer(x, src_key_padding_mask=(~attention_mask.bool()))
