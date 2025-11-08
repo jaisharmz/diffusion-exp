@@ -24,12 +24,11 @@ def get_batch(batch_size, seq_len, data_encoded, tokenizer):
     x0 = []
     x1 = []
     for j in range(batch_size):
-        i = random.randint(0, len(data_encoded) - seq_len - 5)
-        shift = random.randint(1, 4)
-        x0_chunk = data_encoded[i : i + seq_len]
-        x1_chunk = data_encoded[i + shift : i + seq_len + shift]
-        x0.append([tokenizer.BOS_TOKEN] + x0_chunk)
-        x1.append([tokenizer.BOS_TOKEN] + x1_chunk)
+        i = random.randint(0, len(data_encoded) - seq_len)
+        x0_chunk = [tokenizer.MASK_TOKEN for k in range(seq_len)]
+        x1_chunk = data_encoded[i:i+seq_len]
+        x0.append(x0_chunk)
+        x1.append(x1_chunk)
     x0 = tokenizer.to_tensor(x0)
     x1 = tokenizer.to_tensor(x1)
     return x0, x1

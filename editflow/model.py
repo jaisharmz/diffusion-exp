@@ -64,6 +64,7 @@ class NNModel(nn.Module):
         self.ce = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_id)
         self.softmax = nn.Softmax(dim=-1)
         self.softplus = nn.Softplus()
+        self.cache_inputs = None
     # def forward(self, zt, t, padding_mask):
     def forward(self, input_ids, attention_mask, t):
         # predict lambdas: rate of (substituting, deleting, inserting) any token at i
@@ -97,20 +98,34 @@ class NNModel(nn.Module):
         # inputs have x0 and x1
         device = self.device
         B = len(inputs["x0_ids"])
-        aligns = [align_pair(x0, x1, self.tokenizer) for x0, x1 in zip(inputs["x0_ids"], inputs["x1_ids"])]
+        use_cache = inputs == self.cache_inputs
+        if use_cache:
+            aligns = self.cache_aligns
+        else:
+            aligns = [align_pair(x0, x1, self.tokenizer) for x0, x1 in zip(inputs["x0_ids"], inputs["x1_ids"])]
+            self.cache_inputs = inputs
+            self.cache_aligns = aligns
 
         z0_list = [a["z0"] for a in aligns]
         z1_list = [a["z1"] for a in aligns]
         
-        t = (1 - self.time_epsilon) * torch.rand(B, 1, device=device)
-        k = self.scheduler.kappa(t).to(device)
-        w = self.scheduler.weight(t).squeeze(1).to(device)
         
-        zt_list = []
-        for z0, z1, kb in zip(z0_list, z1_list, k.squeeze(1).tolist()):
-            choose_target = torch.rand(len(z0)) < kb
-            zt = [b if choose_target[j] else a for j, (a, b) in enumerate(zip(z0, z1))]
-            zt_list.append(zt)
+        if use_cache:
+            t = self.cache_t
+            k = self.scheduler.kappa(t).to(device)
+            w = self.scheduler.weight(t).squeeze(1).to(device)
+            zt_list = self.cache_zt_list
+        else:
+            t = (1 - self.time_epsilon) * torch.rand(B, 1, device=device)
+            k = self.scheduler.kappa(t).to(device)
+            w = self.scheduler.weight(t).squeeze(1).to(device)
+            zt_list = []
+            for z0, z1, kb in zip(z0_list, z1_list, k.squeeze(1).tolist()):
+                choose_target = torch.rand(len(z0)) < kb
+                zt = [b if choose_target[j] else a for j, (a, b) in enumerate(zip(z0, z1))]
+                zt_list.append(zt)
+            self.cache_zt_list = zt_list
+            self.cache_t = t
         
         xt_list = [[c for c in zt if c != self.tokenizer.BLANK] for zt in zt_list]
         edits_list = [build_remaining_edits(zt, z1, self.tokenizer) for zt, z1 in zip(zt_list, z1_list)]
