@@ -145,3 +145,16 @@ def pad_1d(batch_lists, pad_val):
         out[b, :L] = torch.tensor(x, dtype=torch.long)
         mask[b, :L] = 1
     return out, mask
+
+def perturb_string(s, tokenizer, p=0.3):
+    """Randomly substitutes characters in a string with other vocab characters."""
+    # Get all valid characters from the tokenizer's vocab, excluding <MASK>
+    vocab_chars = [v for k,v in tokenizer.inv_vocab.items() if k != tokenizer.MASK_TOKEN]
+    
+    chars = list(s)
+    for i in range(len(chars)):
+        if random.random() < p:
+            # Pick a random new character
+            new_char = random.choice(vocab_chars)
+            chars[i] = new_char
+    return "".join(chars)

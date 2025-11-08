@@ -65,6 +65,15 @@ class NNModel(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.softplus = nn.Softplus()
         self.cache_inputs = None
+
+        nn.init.zeros_(self.rates_out[2].weight)
+        nn.init.zeros_(self.rates_out[2].bias)
+
+        # You can do the same for the logit layers
+        nn.init.zeros_(self.prob_ins[2].weight)
+        nn.init.zeros_(self.prob_ins[2].bias)
+        nn.init.zeros_(self.prob_sub[2].weight)
+        nn.init.zeros_(self.prob_sub[2].bias)
     # def forward(self, zt, t, padding_mask):
     def forward(self, input_ids, attention_mask, t):
         # predict lambdas: rate of (substituting, deleting, inserting) any token at i
@@ -98,7 +107,7 @@ class NNModel(nn.Module):
         # inputs have x0 and x1
         device = self.device
         B = len(inputs["x0_ids"])
-        use_cache = inputs == self.cache_inputs
+        use_cache = inputs is self.cache_inputs
         if use_cache:
             aligns = self.cache_aligns
         else:
