@@ -37,12 +37,9 @@ class Tokenizer:
 
 # class Tokenizer:
 #     def __init__(self):
-#         self.vocab = {"<PAD>": 0, "<BOS>": 1, "<GAP>": 2}
-#         self.inv_vocab = {0: "<PAD>", 1: "<BOS>", 2: "<GAP>"}
-#         self.PAD_TOKEN = 0
-#         self.BOS_TOKEN = 1
-#         self.GAP_TOKEN = 2
-#         self.BLANK = -1
+#         self.vocab = {"<MASK>": 0}
+#         self.inv_vocab = {0: "<MASK>"}
+#         self.MASK_TOKEN = 0
 #         self.vocab_size = len(self.vocab.keys())
 
 #     def __call__(self, text):
@@ -58,11 +55,11 @@ class Tokenizer:
 #         return self(text)
 
 #     def decode(self, tokens):
-#         return "".join([self.inv_vocab.get(t, "") for t in tokens if t not in (self.PAD_TOKEN, self.GAP_TOKEN)])
+#         return "".join([self.inv_vocab.get(t, "") for t in tokens if t not in (self.MASK_TOKEN)])
 
 #     def to_tensor(self, batch):
 #         max_len = max(len(seq) for seq in batch)
-#         tensor = torch.full((len(batch), max_len), self.PAD_TOKEN, dtype=torch.long)
+#         tensor = torch.full((len(batch), max_len), self.MASK_TOKEN, dtype=torch.long)
 #         for i, seq in enumerate(batch):
 #             tensor[i, : len(seq)] = torch.tensor(seq, dtype=torch.long)
 #         return tensor
