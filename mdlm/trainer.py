@@ -5,7 +5,7 @@ import transformers
 from scheduler import LinearAlphaScheduler
 
 class TrainingArguments(transformers.TrainingArguments):
-    output_dir: str = "models/ModernBERT-base/tiny-shakespeare"
+    output_dir: str = "models/bert-base-uncased/tiny-shakespeare"
     report_to: str = "wandb"
     overwrite_output_dir: bool = True
     seed: int = 42
@@ -29,24 +29,25 @@ class Trainer(transformers.Trainer):
         super().__init__(*args, **kwargs)
         self.scheduler = LinearAlphaScheduler()
         self.time_epsilon = time_epsilon
-    def _compute_loss_weights(self, t, inputs):
-        b, l = inputs["input_ids"].shape
+    def _compute_loss_weights(self, t, input_ids):
+        b, l = input_ids.shape
         loss_weights = -self.scheduler.weight(t).unsqueeze(1).repeat(1, l)
         return loss_weights
     def prediction_step(self, model, inputs):
-        loss, outputs = self.compute_loss(model, inputs)
+        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
         logits, labels = outputs.logits.detach().contiguous(), inputs["labels"].detach().contiguous()
         return loss.detach(), logits, labels
-    def compute_loss(self, model, inputs):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         input_ids, labels, attention_mask = inputs["input_ids"], inputs["labels"], inputs.get("attention_mask", None)
         b, l = input_ids.shape
         device = input_ids.device
         t = self.time_epsilon + (1 - self.time_epsilon) * torch.rand(b, device=device)
         p_mask = 1 - self.scheduler(t).unsqueeze(1).expand(b, l)
-        masked_indices = torch.rand((b, l), device=device) < p_mask # label = -100 ignored (not implemented)
+        masked_indices = (torch.rand((b, l), device=device) < p_mask) & (labels != -100)
         outputs = model(input_ids=input_ids, attention_mask=attention_mask)
         logits = outputs.logits
         loss_weights = self._compute_loss_weights(t, input_ids)
         token_loss = F.cross_entropy(logits[masked_indices], labels[masked_indices], reduction="none") * loss_weights[masked_indices]
-        loss = torch.sum(token_loss / masked_indices.sum()) / b
-        return loss, outputs
+        effective_lengths = torch.sum(labels != -100, dim=1, keepdim=True).expand(b, l)
+        loss = torch.sum(token_loss / effective_lengths[masked_indices]) / b
+        return (loss, outputs) if return_outputs else loss

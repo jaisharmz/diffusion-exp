@@ -12,7 +12,7 @@ dataset = load_dataset("Trelis/tiny-shakespeare")
 tokenize_function = get_tokenize_function(tokenizer, "Text", 128)
 dataset = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
 training_args = TrainingArguments()
-trainer = Trainer(model, tokenizer, 
+trainer = Trainer(model=model, tokenizer=tokenizer, 
                   train_dataset=dataset["train"],
                   eval_dataset=dataset["test"],
                   args=training_args,

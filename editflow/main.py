@@ -5,7 +5,7 @@ from utils import get_batch, align_pair, get_zt, Edit, perturb_string
 from generate import Tokenizer, generate
 from model import NNModel
 
-# TODO: 1) fix pad token, 2) safe log, 3) make torch Dataset object and collate function
+# TODO: 1) fix pad token, 2) safe log, 3) make torch Dataset object and collate function, 4) save model
 
 filename = "tinyshakespeare.txt"
 df = open(filename, "r").read()#[:1000]
@@ -22,7 +22,7 @@ model.to(device)
 num_steps = 1000
 # batch_size = 2
 max_seq_len = 128
-num_ministeps = 100
+num_ministeps = 1000
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 losses = []
