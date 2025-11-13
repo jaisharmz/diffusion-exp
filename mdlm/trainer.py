@@ -5,7 +5,7 @@ import transformers
 from scheduler import LinearAlphaScheduler
 
 class TrainingArguments(transformers.TrainingArguments):
-    output_dir: str = "models/bert-base-uncased/tiny-shakespeare"
+    output_dir: str = "models/ModernBERT-large/tiny-shakespeare"
     report_to: str = "wandb"
     overwrite_output_dir: bool = True
     seed: int = 42
