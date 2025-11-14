@@ -17,11 +17,11 @@ class TrainingArguments(transformers.TrainingArguments):
     warmup_ratio: float = 0.1
     bf16: bool = True
     num_train_epochs: float = 20
-    logging_steps: float = 10
+    logging_steps: int = 10
     eval_on_start: bool = False
     eval_strategy: str = "steps"
-    eval_steps: float = 0.1
-    save_steps: float = 0.1
+    eval_steps: int = 500
+    save_steps: int = 500
     save_only_model: bool = True
 
 class Trainer(transformers.Trainer):
