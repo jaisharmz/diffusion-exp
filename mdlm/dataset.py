@@ -73,8 +73,8 @@ def load_sft_dataset(dataset_args):
         "train": concatenate_datasets(train_datasets),
         "test": concatenate_datasets(test_datasets)
     })
-    combined_dataset["train"] = combined_dataset["train"].shuffle(seed=0).select(range(100000))
-    combined_dataset["test"] = combined_dataset["test"].shuffle(seed=0).select(range(10000))
+    combined_dataset["train"] = combined_dataset["train"].shuffle(seed=0).select(range(10000))
+    combined_dataset["test"] = combined_dataset["test"].shuffle(seed=0).select(range(1000))
     return combined_dataset
 
 def group_texts(examples, max_length):

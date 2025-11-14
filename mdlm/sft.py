@@ -8,7 +8,7 @@ from dataset import get_map_function, NoAttentionMaskCollator, load_sft_dataset,
 from model import get_model_and_tokenizer
 from trainer import Trainer, TrainingArguments
 
-max_length = 512
+max_length = 2048
 model, tokenizer = get_model_and_tokenizer("answerdotai/ModernBERT-base")
 dataset = load_sft_dataset("allenai/tulu-3-sft-mixture|HuggingFaceTB/smoltalk")
 map_function = get_map_function(model, tokenizer, True)
@@ -16,7 +16,7 @@ group_texts_function = get_group_texts_function(max_length)
 dataset = dataset.map(map_function)
 dataset = dataset.map(group_texts_function, batched=True, batch_size=1000, num_proc=4)
 dataset = dataset.filter(lambda row: len(row["input_ids"]) <= max_length)
-training_args = TrainingArguments(output_dir="models/ModernBERT-large/alpaca", logging_steps=1, eval_steps=50)
+training_args = TrainingArguments(output_dir="models/ModernBERT-large/alpaca", logging_steps=10, eval_steps=50, num_train_epochs=3)
 trainer = Trainer(model=model, tokenizer=tokenizer, 
                   train_dataset=dataset["train"],
                   eval_dataset=dataset.get("test", None),

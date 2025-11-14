@@ -37,17 +37,63 @@ class Trainer(transformers.Trainer):
         loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
         logits, labels = outputs.logits.detach().contiguous(), inputs["labels"].detach().contiguous()
         return loss.detach(), logits, labels
+    # def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+    #     input_ids, labels, attention_mask = inputs["input_ids"], inputs["labels"], inputs.get("attention_mask", None)
+    #     b, l = input_ids.shape
+    #     device = input_ids.device
+    #     t = self.time_epsilon + (1 - self.time_epsilon) * torch.rand(b, device=device)
+    #     p_mask = 1 - self.scheduler(t).unsqueeze(1).expand(b, l)
+    #     masked_indices = (torch.rand((b, l), device=device) < p_mask) & (labels != -100)
+    #     outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+    #     logits = outputs.logits
+    #     loss_weights = self._compute_loss_weights(t, input_ids)
+    #     token_loss = F.cross_entropy(logits[masked_indices], labels[masked_indices], reduction="none") * loss_weights[masked_indices]
+    #     effective_lengths = torch.sum(labels != -100, dim=1, keepdim=True).expand(b, l)
+    #     loss = torch.sum(token_loss / effective_lengths[masked_indices]) / b
+    #     return (loss, outputs) if return_outputs else loss
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         input_ids, labels, attention_mask = inputs["input_ids"], inputs["labels"], inputs.get("attention_mask", None)
         b, l = input_ids.shape
         device = input_ids.device
+        
         t = self.time_epsilon + (1 - self.time_epsilon) * torch.rand(b, device=device)
         p_mask = 1 - self.scheduler(t).unsqueeze(1).expand(b, l)
+        
+        # 1. Determine which tokens to mask
         masked_indices = (torch.rand((b, l), device=device) < p_mask) & (labels != -100)
-        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+        
+        # --- START FIX ---
+        
+        # 2. Get the mask token ID
+        # We need the tokenizer, which the Trainer has as self.tokenizer
+        mask_token_id = self.tokenizer.mask_token_id
+        
+        # 3. Create the "noised" (masked) input
+        noised_input_ids = torch.where(
+            masked_indices, 
+            mask_token_id, 
+            input_ids
+        )
+        
+        # 4. Feed the NOISED inputs to the model
+        outputs = model(input_ids=noised_input_ids, attention_mask=attention_mask)
+        
+        # --- END FIX ---
+        
         logits = outputs.logits
         loss_weights = self._compute_loss_weights(t, input_ids)
+        
+        # 5. Calculate loss (this part was already correct)
+        # We compare the model's output (from noised input) 
+        # to the ORIGINAL labels
         token_loss = F.cross_entropy(logits[masked_indices], labels[masked_indices], reduction="none") * loss_weights[masked_indices]
         effective_lengths = torch.sum(labels != -100, dim=1, keepdim=True).expand(b, l)
-        loss = torch.sum(token_loss / effective_lengths[masked_indices]) / b
+        
+        # Handle cases where no tokens are masked (to prevent division by zero)
+        num_masked = masked_indices.sum()
+        if num_masked == 0:
+             loss = torch.tensor(0.0, device=device, requires_grad=True)
+        else:
+             loss = torch.sum(token_loss / effective_lengths[masked_indices]) / b
+             
         return (loss, outputs) if return_outputs else loss
