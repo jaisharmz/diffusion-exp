@@ -11,12 +11,13 @@ from trainer import Trainer, TrainingArguments
 max_length = 2048
 model, tokenizer = get_model_and_tokenizer("answerdotai/ModernBERT-base")
 dataset = load_sft_dataset("allenai/tulu-3-sft-mixture|HuggingFaceTB/smoltalk")
-map_function = get_map_function(model, tokenizer, True)
+map_function = get_map_function(model, tokenizer, True, max_length=max_length)
 group_texts_function = get_group_texts_function(max_length)
-dataset = dataset.map(map_function)
-dataset = dataset.map(group_texts_function, batched=True, batch_size=1000, num_proc=4)
-dataset = dataset.filter(lambda row: len(row["input_ids"]) <= max_length)
-training_args = TrainingArguments(output_dir="models/ModernBERT-large/alpaca", logging_steps=10, eval_steps=50, num_train_epochs=3)
+dataset = dataset.map(map_function, num_proc=4)
+dataset = dataset.map(group_texts_function, batched=True, batch_size=1000, num_proc=4, load_from_cache_file=False)
+# dataset = dataset.filter(lambda row: len(row["input_ids"]) <= max_length)
+training_args = TrainingArguments(output_dir="models/ModernBERT-large/alpaca", logging_steps=10, eval_steps=50, num_train_epochs=3,
+                                  per_device_train_batch_size=2, gradient_accumulation_steps=32)
 trainer = Trainer(model=model, tokenizer=tokenizer, 
                   train_dataset=dataset["train"],
                   eval_dataset=dataset.get("test", None),

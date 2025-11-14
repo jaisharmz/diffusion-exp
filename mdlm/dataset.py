@@ -26,19 +26,20 @@ def get_tokenize_function(tokenizer, text_field, seq_length):
     )
     return tokenize_func
 
-def default_sft_map_fn(row, tokenizer, mask_prompt_loss=True):
+def default_sft_map_fn(row, tokenizer, mask_prompt_loss=True, max_length=None):
     input_ids = tokenizer.apply_chat_template(row["messages"], tokenize=True, add_generation_prompt=False)
     labels = input_ids.copy()
     if mask_prompt_loss:
-        prompt_tokens = tokenizer.apply_chat_template(row["messages"], tokenize=True, add_generation_prompt=True)
+        prompt_tokens = tokenizer.apply_chat_template(row["messages"], tokenize=True, add_generation_prompt=True, truncation=True, max_length=max_length)
         labels[:len(prompt_tokens)] = [-100] * len(prompt_tokens)
     return {"input_ids": input_ids, "labels": labels}
 
-def get_map_function(model, tokenizer, mask_prompt_loss=True):
+def get_map_function(model, tokenizer, mask_prompt_loss=True, max_length=None):
     map_function = functools.partial(
         default_sft_map_fn, 
         tokenizer=tokenizer, 
-        mask_prompt_loss=mask_prompt_loss
+        mask_prompt_loss=mask_prompt_loss,
+        max_length=max_length
     )
     return map_function
 
@@ -73,8 +74,8 @@ def load_sft_dataset(dataset_args):
         "train": concatenate_datasets(train_datasets),
         "test": concatenate_datasets(test_datasets)
     })
-    combined_dataset["train"] = combined_dataset["train"].shuffle(seed=0).select(range(10000))
-    combined_dataset["test"] = combined_dataset["test"].shuffle(seed=0).select(range(1000))
+    combined_dataset["train"] = combined_dataset["train"].shuffle(seed=0).select(range(100000))
+    combined_dataset["test"] = combined_dataset["test"].shuffle(seed=0).select(range(10000))
     return combined_dataset
 
 def group_texts(examples, max_length):
