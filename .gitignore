@@ -1,2 +1,3 @@
 mdlm/trainer_output/*
 mdlm/wandb/*
+mdlm/models/*
