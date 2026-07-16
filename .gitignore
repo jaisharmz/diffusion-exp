@@ -2,4 +2,5 @@ mdlm/trainer_output/*
 mdlm/wandb/*
 mdlm/models/*
 flow_matching/plots
+flow_matching/data
 *.pth
