@@ -17,8 +17,8 @@ class TrainingArguments(transformers.TrainingArguments):
     warmup_ratio: float = 0.1
     bf16: bool = True
     num_train_epochs: float = 20
-    logging_steps: int = 10
-    eval_on_start: bool = False
+    logging_steps: int = 1
+    eval_on_start: bool = True
     eval_strategy: str = "steps"
     eval_steps: int = 500
     save_steps: int = 500
@@ -66,7 +66,7 @@ class Trainer(transformers.Trainer):
         
         # 2. Get the mask token ID
         # We need the tokenizer, which the Trainer has as self.tokenizer
-        mask_token_id = self.tokenizer.mask_token_id
+        mask_token_id = self.processing_class.mask_token_id
         
         # 3. Create the "noised" (masked) input
         noised_input_ids = torch.where(
